@@ -4,8 +4,8 @@ import json.scanner
 import dbcontrol
 import requests
 from requests.auth import HTTPBasicAuth
-import json
 
+# Set up query
 db = dbcontrol.DBControl("jira.db", ".")
 with open(os.path.join(".","jira_connection.json")) as jirasettingsfile:
     jirasettings = json.load(jirasettingsfile)
@@ -16,19 +16,23 @@ with open(os.path.join(".","jira_connection.json")) as jirasettingsfile:
 auth = HTTPBasicAuth(jiraUser, jiraKey)
 
 headers = {
-  "Accept": "application/json"
+    "Accept": "application/json"
 }
 
 query = {
-  'jql': 'project = SMART AND updated > "2024-05-10 17:51"'
+    'jql': 'project = SMART AND updated > "2024-05-10 17:51"'
 }
 
-response = requests.request(
-   "GET",
-   url,
-   headers=headers,
-   params=query,
-   auth=auth
-)
+try:
+  response = requests.request(
+    "GET",
+    url,
+    headers=headers,
+    params=query,
+    auth=auth
+  )
+except Exception as e:
+    print("Error with request ")
+    print(e)
 
-print(json.dumps(json.loads(response.text), sort_keys=True, indent=4, separators=(",", ": ")))
+db.load_transactions(response.text)
