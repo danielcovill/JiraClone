@@ -34,7 +34,7 @@ class DBControl:
                         "(key, val)")
 
     # Updates or inserts transactions based on thier jira id (not key) as appropriate
-    def load_transactions(self, search_json):
+    def load_tickets(self, search_json):
         results = json.loads(search_json)
         rows = []
 

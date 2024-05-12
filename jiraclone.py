@@ -35,4 +35,4 @@ except Exception as e:
     print("Error with request ")
     print(e)
 
-db.load_transactions(response.text)
+db.load_tickets(response.text)
