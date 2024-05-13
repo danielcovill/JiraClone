@@ -62,3 +62,6 @@ class JiraApi:
             if recordsReceived >= int(response_json["total"]):
                 morePages = False    
         return allRecords
+
+    def update_ticket_history(self, tickets):
+        raise NotImplementedError()
