@@ -17,7 +17,7 @@ class JiraApi:
             self.jira_user = jirasettings["UserName"]
             self.jira_key = jirasettings["ApiKey"]
 
-    def get_transactions_since(self, lastUpdated):
+    def get_tickets_since(self, lastUpdated):
         auth = HTTPBasicAuth(self.jira_user, self.jira_key)
 
         headers = {
