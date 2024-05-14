@@ -141,3 +141,12 @@ class DBControl:
             cursor.executemany(sql, rows)
             cursor.execute(sql2)
             cursor.close()
+
+
+    def get_tickets_without_history(self):
+        with self.dbConn:
+            cursor = self.dbConn.cursor()
+            cursor.execute("SELECT * FROM tickets WHERE key = 'last_updated';")
+            self.last_updated = cursor.fetchone()[1]
+
+        raise NotImplementedError()

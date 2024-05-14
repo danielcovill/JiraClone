@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime
+from datetime import tzinfo 
 import requests
 from requests.auth import HTTPBasicAuth
 
@@ -13,23 +14,32 @@ class JiraApi:
         configFilePath = os.path.join(".","jira_connection.json")
         with open(configFilePath) as jirasettingsfile:
             jirasettings = json.load(jirasettingsfile)
-            self.jira_url = jirasettings["url"] + "search"
+            self.jira_url = jirasettings["url"]
             self.jira_user = jirasettings["UserName"]
             self.jira_key = jirasettings["ApiKey"]
-
-    def get_tickets_since(self, lastUpdated):
-        auth = HTTPBasicAuth(self.jira_user, self.jira_key)
-
-        headers = {
+        self.auth = HTTPBasicAuth(self.jira_user, self.jira_key)
+        self.headers = {
             "Accept": "application/json"
         }
 
-        jql = f'project = {self.project_name}'
         try:
-            updatedDateTime = datetime.strptime(lastUpdated, "%Y-%m-%dT%H:%M:%S.%f%z")
-            # TODO Figure out how to handle the time zone properly here
-            jql += f' AND updated > "{updatedDateTime.strftime("%Y-%m-%d %H:%M")}"'
+            response = requests.request(
+                "GET",
+                self.jira_url + "serverInfo",
+                headers=self.headers,
+                auth=self.auth
+            )
+            server_time = json.loads(response.text)["serverTime"]
+            self.server_time_offset = datetime.fromisoformat(server_time).utcoffset()
         except:
+            print("Error getting jira server info.")
+
+    def get_tickets_since(self, lastUpdatedUTC):
+        jql = f'project = {self.project_name}'
+        if lastUpdatedUTC != None:
+            updatedDateTime = datetime.strptime(lastUpdatedUTC, "%Y-%m-%dT%H:%M:%S.%f%z")
+            jql += f' AND updated > "{(updatedDateTime + self.server_time_offset).strftime("%Y-%m-%d %H:%M")}"'
+        else:
             updatedDateTime = None
         
         print(f"Last updated: {updatedDateTime.strftime("%Y-%m-%d %H:%M:%S") if updatedDateTime != None else "Never"}")
@@ -37,7 +47,6 @@ class JiraApi:
         recordsReceived = 0
         morePages = True
 
-        # TODO: store the records as we go, then refactor the DB code to just take the records json
         allRecords = []
 
         while morePages: 
@@ -49,10 +58,10 @@ class JiraApi:
 
             response = requests.request(
                 "GET",
-                self.jira_url,
-                headers=headers,
+                self.jira_url + "search",
+                headers=self.headers,
                 params=query,
-                auth=auth
+                auth=self.auth
             )
 
             response_json = json.loads(response.text)
