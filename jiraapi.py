@@ -1,8 +1,8 @@
 import json
 import os
-from datetime import datetime
-from datetime import tzinfo 
+from datetime import datetime, time
 import requests
+from requests.adapters import HTTPAdapter, Retry
 from requests.auth import HTTPBasicAuth
 
 
@@ -23,16 +23,16 @@ class JiraApi:
         }
 
         try:
-            response = requests.request(
-                "GET",
-                self.jira_url + "serverInfo",
-                headers=self.request_headers,
-                auth=self.request_auth
-            )
+            try:
+                response = self.get_request(url = self.jira_url + "serverInfo")
+            except:
+                print("Failure getting server info")
+                exit(1)
             server_time = json.loads(response.text)["serverTime"]
             self.server_time_offset = datetime.fromisoformat(server_time).utcoffset()
         except:
             print("Error getting jira server info.")
+            exit(1)
 
     def get_tickets_since_UTC(self, lastUpdatedUTC):
         jql = f'project = {self.project_name}'
@@ -52,13 +52,11 @@ class JiraApi:
                 'startAt': recordsReceived,
                 'maxResults': 50
             }
-            response = requests.request(
-                "GET",
-                self.jira_url + "search",
-                headers=self.request_headers,
-                params=query,
-                auth=self.request_auth
-            )
+            try:
+                response = self.get_request(url=self.jira_url + "search", params=query)
+            except:
+                print("Error getting tickets, exiting...")
+                exit(1)
             response_json = json.loads(response.text)
             recordsReceived += len(response_json["issues"])
             allRecords.extend(response_json["issues"])
@@ -83,13 +81,11 @@ class JiraApi:
                     'startAt': recordsReceived,
                     'maxResults': 50
                 }
-                response = requests.request(
-                    "GET",
-                    f"{self.jira_url}/issue/{ticket_id}/changelog",
-                    headers = self.request_headers,
-                    auth = self.request_auth,
-                    params = query
-                )
+                try:
+                    response = self.get_request(url=f"{self.jira_url}/issue/{ticket_id}/changelog", params=query)
+                except:
+                    print("Error getting ticket histories, exiting...")
+                    exit(1)
                 response_json = json.loads(response.text)
                 recordsReceived += len(response_json["values"])
                 ticket_history.extend(response_json["values"])
@@ -102,3 +98,24 @@ class JiraApi:
                     print(f"Received history items {recordsReceived} of {response_json["total"]}"
                           f" for ticket {ticket_index} of {len(ticket_ids)}")
         return allRecords
+
+    def get_request(self, url, params):
+        attempt = 1
+        backoff_sec = [0, .1, 1, 5]
+        while attempt >= 5:
+            try:
+                response = requests.request(
+                    "GET",
+                    url = url,
+                    headers=self.request_headers,
+                    auth=self.request_auth,
+                    params=params
+                )
+            except (ConnectionError) as e:
+                if(attempt >=5):
+                    raise e
+                print(e.strerror)
+                print(f"Waiting {backoff_sec[attempt]} seconds to retry (attempt {attempt} of 5)...")
+                time.sleep(backoff_sec[attempt])
+                attempt += 1
+        return response
