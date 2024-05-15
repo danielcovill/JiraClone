@@ -21,18 +21,13 @@ class JiraApi:
         self.request_headers = {
             "Accept": "application/json"
         }
-
         try:
-            try:
-                response = self.get_request(url = self.jira_url + "serverInfo")
-            except:
-                print("Failure getting server info")
-                exit(1)
-            server_time = json.loads(response.text)["serverTime"]
-            self.server_time_offset = datetime.fromisoformat(server_time).utcoffset()
+            response = self.get_request(url = self.jira_url + "serverInfo", params=None)
         except:
-            print("Error getting jira server info.")
+            print("Failure getting server info")
             exit(1)
+        server_time = json.loads(response.text)["serverTime"]
+        self.server_time_offset = datetime.fromisoformat(server_time).utcoffset()
 
     def get_tickets_since_UTC(self, lastUpdatedUTC):
         jql = f'project = {self.project_name}'
@@ -102,7 +97,8 @@ class JiraApi:
     def get_request(self, url, params):
         attempt = 1
         backoff_sec = [0, .1, 1, 5]
-        while attempt >= 5:
+        response = None
+        while attempt <= 5 and (response == None or not response.ok):
             try:
                 response = requests.request(
                     "GET",
@@ -112,7 +108,7 @@ class JiraApi:
                     params=params
                 )
             except (ConnectionError) as e:
-                if(attempt >=5):
+                if(attempt > 5):
                     raise e
                 print(e.strerror)
                 print(f"Waiting {backoff_sec[attempt]} seconds to retry (attempt {attempt} of 5)...")
