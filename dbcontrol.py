@@ -28,14 +28,18 @@ class DBControl:
                         "story_points, "
                         "fix_version, "
                         "severity)")
-            cursor.execute("CREATE TABLE IF NOT EXISTS links"
-                        "(source_id UNIQUE, related_id UNIQUE, relationship)")
+            # Not doing links for now
+            # cursor.execute("CREATE TABLE IF NOT EXISTS links"
+            #            "(source_id UNIQUE, related_id UNIQUE, relationship)")
             cursor.execute("CREATE TABLE IF NOT EXISTS history"
-                        "(id PRIMARY KEY, changetype, from_val, to_val, date)")
+                        "(ticket_id, author, field, from_val, to_val, updated)")
             cursor.execute("CREATE TABLE IF NOT EXISTS metadata"
                         "(key, val)")
             cursor.execute("SELECT * FROM metadata WHERE key = 'last_updated';")
-            self.last_updated = cursor.fetchone()[1]
+            self.last_updated = cursor.fetchone()
+            if self.last_updated != None:
+                self.last_updated = self.last_updated[1]
+            
             # This could be because we haven't initialized the table so the key doesn't 
             # exist, or because we've never completed an update so the value is NULL. 
             # Either way, we do a reset to make sure the key is there for when we need it
@@ -44,16 +48,15 @@ class DBControl:
                 cursor.execute("INSERT INTO metadata (key, val) VALUES ('last_updated', NULL);")
 
 
-    def get_last_updated(self):
+    def get_last_updated_UTC(self):
         return self.last_updated
 
     # Updates or inserts transactions based on thier jira id (not key) as appropriate
-    def load_tickets(self, tickets):
+    def store_tickets(self, tickets):
         updateDateTime = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%z")
         rows = []
 
         for ticket in tickets:
-
             id = ticket["id"]
             jira_key = ticket["key"]
             issue_type = ticket["fields"]["issuetype"]["name"]
@@ -143,10 +146,47 @@ class DBControl:
             cursor.close()
 
 
-    def get_tickets_without_history(self):
+    def get_ticket_ids_without_history(self):
         with self.dbConn:
             cursor = self.dbConn.cursor()
-            cursor.execute("SELECT * FROM tickets WHERE key = 'last_updated';")
-            self.last_updated = cursor.fetchone()[1]
+            cursor.execute("SELECT t.id FROM tickets t LEFT JOIN history h ON t.id = h.ticket_id WHERE h.ticket_id is null;")
+            result = [o[0] for o in cursor.fetchall()]
+            cursor.close()
+        return result
 
-        raise NotImplementedError()
+    def store_histories(self, ticket_histories):
+        rows = []
+        for ticket in ticket_histories:
+            ticket_id = ticket["ticket_id"]
+            for history_entry in ticket["history"]:
+                try:
+                    author = history_entry["author"]["emailAddress"]
+                except (KeyError) as e:
+                    author = history_entry["author"]["displayName"]
+                except (IndexError, TypeError) as e:
+                    author = None
+                updated = history_entry["created"]
+                for changed_value in history_entry["items"]:
+                    field = changed_value["field"]
+                    from_val = changed_value["fromString"]
+                    to_val = changed_value["toString"]
+                    rows.append({
+                        "ticket_id": ticket_id,
+                        "author": author,
+                        "field": field,
+                        "from_val": from_val,
+                        "to_val": to_val,
+                        "updated": updated
+                    })
+        sql = ("INSERT INTO history VALUES("
+               ":ticket_id, "
+               ":author, "
+               ":field, "
+               ":from_val, "
+               ":to_val, "
+               ":updated)")
+
+        with self.dbConn:
+            cursor = self.dbConn.cursor()
+            cursor.executemany(sql, rows)
+            cursor.close()

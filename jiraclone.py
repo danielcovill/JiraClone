@@ -3,17 +3,23 @@ import jiraapi
 
 
 db = dbcontrol.DBControl("jira.db", ".")
-lastUpdatedUTC = db.get_last_updated()
+lastUpdatedUTC = db.get_last_updated_UTC()
 
-print(f"Last updated: {lastUpdatedUTC}")
 print("Querying Jira for new tickets...")
+print(f"Last updated: {lastUpdatedUTC}")
 jira = jiraapi.JiraApi("SMART")
-tickets = jira.get_tickets_since(lastUpdatedUTC)
+tickets = jira.get_tickets_since_UTC(lastUpdatedUTC)
+
 print(f"Storing {len(tickets)} tickets in database...")
-db.load_tickets(tickets)
-print("Store complete...")
-print("Loading ticket history data...")
-tickets_needing_history = db.get_tickets_without_history()
-# TODO: Merge is with the list of updated tickets, who will have new history to record
-jira.update_ticket_history(tickets_needing_history)
-print("Ticket history update complete")
+db.store_tickets(tickets)
+
+print("Querying Jira for ticket histories...")
+# Getting the tickets without history after the insert means
+# we also catch any random ones that need cleanup
+ticket_ids = db.get_ticket_ids_without_history()
+histories = jira.get_tickets_histories(ticket_ids)
+
+print(f"Updating {len(histories)} history entries in database...")
+db.store_histories(histories)
+
+print("Update complete")
