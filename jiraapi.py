@@ -2,7 +2,6 @@ import json
 import os
 from datetime import datetime, time
 import requests
-from requests.adapters import HTTPAdapter, Retry
 from requests.auth import HTTPBasicAuth
 
 
