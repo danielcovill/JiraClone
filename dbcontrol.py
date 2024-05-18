@@ -34,83 +34,36 @@ class DBControl:
                         "(ticket_id, author, field, from_val, to_val, updated);")
             cursor.execute("CREATE TABLE IF NOT EXISTS metadata (key, val);")
 
-            cursor.execute("SELECT * FROM metadata WHERE key = 'last_updated';")
+            cursor.execute("SELECT count(*) FROM metadata WHERE key = 'last_updated';")
             last_updated = cursor.fetchone()
-            if last_updated is None:
-                # This could be because we haven't initialized the table so the key doesn't 
-                # exist, or because we've never completed an update so the value is NULL. 
-                # Either way, we do a reset to make sure the key is there for when we need it
+            if last_updated[0] == 0:
                 cursor.execute("INSERT INTO metadata (key, val) VALUES ('last_updated', NULL);")
-
             self.dbConn.commit()
 
+    def set_last_updated_UTC(self):
+        update_date_sql = ("UPDATE metadata SET val = "
+                        f"'{datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%z")}'"
+                        " WHERE key = 'last_updated';")
+        with self.dbConn:
+            cursor = self.dbConn.cursor()
+            cursor.execute(update_date_sql)
+            self.dbConn.commit()
+        
 
     def get_last_updated_UTC(self):
         with self.dbConn:
             cursor = self.dbConn.cursor()
             cursor.execute("SELECT * FROM metadata WHERE key = 'last_updated';")
             last_updated = cursor.fetchone()
-            if last_updated is not None:
-                return last_updated[1]
+            if last_updated[1] is not None:
+                return datetime.strptime(last_updated[1], "%Y-%m-%dT%H:%M:%S.%f%z")
             else:
                 return None
 
     # Updates or inserts transactions based on thier jira id (not key) as appropriate
-    def store_ticket(self, ticket):
-        id = ticket["id"]
-        jira_key = ticket["key"]
-        issue_type = ticket["fields"]["issuetype"]["name"]
-        summary = ticket["fields"]["summary"]
-        created = ticket["fields"]["created"]
-        try:
-            updated = ticket["fields"]["updated"]
-        except (IndexError, TypeError) as e:
-            updated = None
-        try:
-            creator = ticket["fields"]["creator"]["emailAddress"]
-        except (KeyError) as e:
-            creator = ticket["fields"]["creator"]["displayName"]
-        except (IndexError, TypeError) as e:
-            creator = None
-        try:
-            assignee = ticket["fields"]["assignee"]["emailAddress"]
-        except (KeyError) as e:
-            assignee = ticket["fields"]["creator"]["displayName"]
-        except (IndexError, TypeError) as e:
-            assignee = None
-        status = ticket["fields"]["status"]["name"]
-        try:
-            resolution = ticket["fields"]["resolution"]["name"]
-        except (IndexError, TypeError) as e:
-            resolution = None
-        #10026 = Story Points
-        story_points = ticket["fields"]["customfield_10026"]
-        try:
-            fix_version = ticket["fields"]["fixVersions"][0]["name"]
-        except (IndexError, TypeError) as e:
-            fix_version = None
-        #10050 = Severity
-        try:
-            severity = ticket["fields"]["customfield_10050"]["value"]
-        except (IndexError, TypeError) as e:
-            severity = None
-        toAdd = {
-            "id": id,
-            "jira_key": jira_key,
-            "issue_type": issue_type,
-            "summary": summary,
-            "created": created,
-            "updated": updated,
-            "creator": creator,
-            "assignee": assignee,
-            "status": status,
-            "resolution": resolution,
-            "story_points": story_points,
-            "fix_version": fix_version,
-            "severity": severity,
-            "sync_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%z")}
-
-        sql = ("INSERT INTO tickets VALUES ("
+    # TODO: make this plural
+    def store_tickets(self, tickets):
+        ticket_sql = ("INSERT INTO tickets VALUES ("
             ":id, "
             ":jira_key, "
             ":issue_type, "
@@ -139,47 +92,99 @@ class DBControl:
             "fix_version=excluded.fix_version, "
             "severity=excluded.severity, "
             "sync_date=sync_date")
-
-        history_rows = []
-        for history_entry in ticket["changelog"]["histories"]:
+        ticket_rows = []
+        for ticket in tickets:
+            id = ticket["id"]
+            jira_key = ticket["key"]
+            issue_type = ticket["fields"]["issuetype"]["name"]
+            summary = ticket["fields"]["summary"]
+            created = ticket["fields"]["created"]
             try:
-                author = history_entry["author"]["emailAddress"]
-            except (KeyError) as e:
-                author = history_entry["author"]["displayName"]
+                updated = ticket["fields"]["updated"]
             except (IndexError, TypeError) as e:
-                author = None
-            updated = history_entry["created"]
-            for changed_value in history_entry["items"]:
-                field = changed_value["field"]
-                from_val = changed_value["fromString"]
-                to_val = changed_value["toString"]
-                history_rows.append({
-                    "ticket_id": id,
-                    "author": author,
-                    "field": field,
-                    "from_val": from_val,
-                    "to_val": to_val,
-                    "updated": updated
-                })
-            sql = ("INSERT INTO history VALUES("
-                ":ticket_id, "
-                ":author, "
-                ":field, "
-                ":from_val, "
-                ":to_val, "
-                ":updated)")
+                updated = None
+            try:
+                creator = ticket["fields"]["creator"]["emailAddress"]
+            except (KeyError) as e:
+                creator = ticket["fields"]["creator"]["displayName"]
+            except (IndexError, TypeError) as e:
+                creator = None
+            try:
+                assignee = ticket["fields"]["assignee"]["emailAddress"]
+            except (KeyError) as e:
+                assignee = ticket["fields"]["creator"]["displayName"]
+            except (IndexError, TypeError) as e:
+                assignee = None
+            status = ticket["fields"]["status"]["name"]
+            try:
+                resolution = ticket["fields"]["resolution"]["name"]
+            except (IndexError, TypeError) as e:
+                resolution = None
+            #10026 = Story Points
+            story_points = ticket["fields"]["customfield_10026"]
+            try:
+                fix_version = ticket["fields"]["fixVersions"][0]["name"]
+            except (IndexError, TypeError) as e:
+                fix_version = None
+            #10050 = Severity
+            try:
+                severity = ticket["fields"]["customfield_10050"]["value"]
+            except (IndexError, TypeError) as e:
+                severity = None
+            ticket_rows.append({
+                "id": id,
+                "jira_key": jira_key,
+                "issue_type": issue_type,
+                "summary": summary,
+                "created": created,
+                "updated": updated,
+                "creator": creator,
+                "assignee": assignee,
+                "status": status,
+                "resolution": resolution,
+                "story_points": story_points,
+                "fix_version": fix_version,
+                "severity": severity,
+                "sync_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%z")})
 
+            history_rows = []
+            history_sql = ("INSERT INTO history VALUES("
+                    ":ticket_id, "
+                    ":author, "
+                    ":field, "
+                    ":from_val, "
+                    ":to_val, "
+                    ":updated)")
+            for history_entry in ticket["changelog"]["histories"]:
+                try:
+                    author = history_entry["author"]["emailAddress"]
+                except (KeyError) as e:
+                    author = history_entry["author"]["displayName"]
+                except (IndexError, TypeError) as e:
+                    author = None
+                updated = history_entry["created"]
+                for changed_value in history_entry["items"]:
+                    field = changed_value["field"]
+                    from_val = changed_value["fromString"]
+                    to_val = changed_value["toString"]
+                    history_rows.append({
+                        "ticket_id": id,
+                        "author": author,
+                        "field": field,
+                        "from_val": from_val,
+                        "to_val": to_val,
+                        "updated": updated
+                    })
         with self.dbConn:
             cursor = self.dbConn.cursor()
-            cursor.execute(sql, toAdd)
-            cursor.executemany(sql, history_rows)
+            cursor.executemany(ticket_sql, ticket_rows)
+            cursor.executemany(history_sql, history_rows)
             self.dbConn.commit()
 
-    def get_missing_tickets(self, jira_ticket_ids):
+    def get_all_ticket_ids(self):
         with self.dbConn:
             cursor = self.dbConn.cursor()
             cursor.execute(f"SELECT id FROM tickets;")
             db_ticket_ids = [id[0] for id in cursor.fetchall()]
-            missing = set(jira_ticket_ids).difference(db_ticket_ids)
             self.dbConn.commit()
-        return missing
+        return db_ticket_ids

@@ -24,92 +24,52 @@ class JiraApi:
             "Content-Type": "application/json"
         }
         try:
-            response = self.request(request_type = "GET", url = self.jira_url + "serverInfo", payload=None)
+            response = self.request(
+                request_type = "GET", 
+                url = self.jira_url + "serverInfo", 
+                payload=None)
         except:
             print("Failure getting server info")
             exit(1)
         server_time = json.loads(response.text)["serverTime"]
         self.server_time_offset = datetime.fromisoformat(server_time).utcoffset()
 
-    def get_missing_ticket_ids(self):
-        print("Getting missing ticket ids from Jira...")
-        jql = f'project = {self.project_name}'
-        all_ticket_ids = []
-        morePages = True
-        batchSize = 10000
-        while morePages: 
-            query = {
-                'jql': jql,
-                'startAt': len(all_ticket_ids),
-                'maxResults': batchSize,
-                'fields': ['id']
-            }
-            try:
-                response = self.request("GET", url=self.jira_url + "search", payload=query)
-            except:
-                print("Error getting update list, exiting...")
-                exit(1)
-            response_json = json.loads(response.text)
-            all_ticket_ids.extend([ticket["id"] for ticket in response_json["issues"]])
-            if(len(all_ticket_ids)== 0):
-                print("No records received")
-            if len(all_ticket_ids) >= int(response_json["total"]):
-                morePages = False
-            print(f"{len(all_ticket_ids)} of {response_json["total"]}")
-        return self.db.get_missing_tickets(all_ticket_ids)
-
     def sync_db(self):
-        missing_ids = self.get_missing_ticket_ids()
+        existing_ids = self.db.get_all_ticket_ids()
         last_updated = self.db.get_last_updated_UTC()
 
-        if len(missing_ids) > 0:
-            missing_ids_query = f"id in ({','.join(missing_ids)})'"
-
-        if last_updated is not None:
-            last_updated_query = f"updated > '{(last_updated + self.server_time_offset).strftime("%Y-%m-%d %H:%M")}'"
-
-        # Build the query for jira
-        jql = f"project = {self.project_name}"
-        if last_updated is not None and len(missing_ids) > 0:
-            jql += f" AND ({last_updated_query} OR {missing_ids_query})"
-        elif last_updated is None and len(missing_ids) > 0:
-            jql += f" AND {missing_ids_query}"
-        elif last_updated is not None and len(missing_ids) == 0:
-            jql += f" AND {last_updated_query}"
+        if last_updated is None or len(existing_ids) == 0:
+            jql = f"project = {self.project_name}"
         else:
-            # if they're both empty, either we have an error, or it's a brand new project with no tickets
-            print("No new tickets found and the db has never been updated.")
-            return
+            last_updated_server_time = (last_updated + self.server_time_offset).strftime("%Y-%m-%d %H:%M")
+            jql = (f'project = {self.project_name} AND '
+                   f'(id NOT IN ({','.join(existing_ids)}) '
+                   f' OR (updated > "{last_updated_server_time}" )'
+                   f'and project = "{self.project_name}")')
 
-        recordsReceived = 0
+        records_received = 0
         morePages = True
-        batchSize = 50
+        batchSize = 1000
         print("Requesting update set from Jira...")
         while morePages: 
             query = {
-                'startAt': recordsReceived,
+                'startAt': records_received,
                 'maxResults': batchSize,
                 'expand': ['changelog'],
                 'jql': jql
             }
             response = self.request("POST", url=self.jira_url + "search", payload=query)
             response_json = json.loads(response.text)
-            recordsReceived += len(response_json["issues"])
-            ticketCounter = 0
-            for ticket in response_json["issues"]:
-                self.db.store_ticket(ticket)
-                self.db.store_histories(ticket["id"], ticket["changelog"]["histories"])
-                ticketCounter += 1
-                if len(response_json["issues"]) < batchSize:
-                    print(f"Received {recordsReceived} of "
-                          f"{response_json["total"]} tickets from Jira")
-                else:
-                    print(f"Received {recordsReceived - (batchSize - ticketCounter)} of "
-                          f"{response_json["total"]} tickets from Jira")
-            if(recordsReceived == 0):
+            self.db.store_tickets(response_json["issues"])
+            records_received += len(response_json["issues"])
+            print(f"Stored {records_received} of {response_json["total"]} "
+                  f"({(records_received/int(response_json["total"])):.0%})")
+            if(records_received == 0):
                 print("No records received")
-            if recordsReceived >= int(response_json["total"]):
+            if records_received >= int(response_json["total"]):
                 morePages = False    
+
+        self.db.set_last_updated_UTC()
         return
 
     def request(self, request_type, url, payload):
