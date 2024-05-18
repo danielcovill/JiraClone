@@ -62,10 +62,11 @@ class JiraApi:
             response_json = json.loads(response.text)
             self.db.store_tickets(response_json["issues"])
             records_received += len(response_json["issues"])
-            print(f"Stored {records_received} of {response_json["total"]} "
-                  f"({(records_received/int(response_json["total"])):.0%})")
             if(records_received == 0):
                 print("No records received")
+            else:
+                print(f"Stored {records_received} of {response_json["total"]} "
+                    f"({(records_received/int(response_json["total"])):.0%})")
             if records_received >= int(response_json["total"]):
                 morePages = False    
 

@@ -61,7 +61,6 @@ class DBControl:
                 return None
 
     # Updates or inserts transactions based on thier jira id (not key) as appropriate
-    # TODO: make this plural
     def store_tickets(self, tickets):
         ticket_sql = ("INSERT INTO tickets VALUES ("
             ":id, "
@@ -93,6 +92,14 @@ class DBControl:
             "severity=excluded.severity, "
             "sync_date=sync_date")
         ticket_rows = []
+        history_sql = ("INSERT INTO history VALUES("
+                ":ticket_id, "
+                ":author, "
+                ":field, "
+                ":from_val, "
+                ":to_val, "
+                ":updated)")
+        history_rows = []
         for ticket in tickets:
             id = ticket["id"]
             jira_key = ticket["key"]
@@ -147,14 +154,6 @@ class DBControl:
                 "severity": severity,
                 "sync_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%z")})
 
-            history_rows = []
-            history_sql = ("INSERT INTO history VALUES("
-                    ":ticket_id, "
-                    ":author, "
-                    ":field, "
-                    ":from_val, "
-                    ":to_val, "
-                    ":updated)")
             for history_entry in ticket["changelog"]["histories"]:
                 try:
                     author = history_entry["author"]["emailAddress"]
