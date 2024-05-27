@@ -8,3 +8,8 @@ When querying, search results will be relative to your configured time zone (whi
 * https://support.atlassian.com/jira-software-cloud/docs/jql-fields/
 
 The consequence of the above is that when querying we must first check the server offset, and then apply it to our request so that we're using "local time" instead of UTC.
+
+
+# Setup
+python3 -m venv .venv 
+* https://docs.python.org/3/tutorial/venv.html#introduction
