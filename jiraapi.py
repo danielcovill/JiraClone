@@ -1,7 +1,7 @@
 import dbcontrol
 import json
 import os
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import requests
 from requests.auth import HTTPBasicAuth
 
@@ -95,3 +95,44 @@ class JiraApi:
                 raise Exception("Error with request", response)
             else:
                 return response
+            
+    # Assumes the items have come in grouped by key and ordered by update date
+    def get_loiter_times(self, ticket_histories):
+        ticket_loiter_times = {}
+        current_status_date = None
+
+        # This only works if the incoming histories are grouped by ticket 
+        # and the statuses only ascend. So to make sure we catch this, we'll 
+        # keep track of the current ticket and its date. If there's a 
+        # deviation we'll raise an error and bail
+        for ticket_history_entry in ticket_histories:
+            jira_key = ticket_history_entry['jira_key']
+            
+            if jira_key not in ticket_loiter_times:
+                ticket_loiter_times[jira_key] = {
+                    'last_status': None, 
+                    'last_update': datetime.fromisoformat(ticket_history_entry['created'])
+                }
+                current_status_date = None
+
+            # Check for out of order key
+            if [*ticket_loiter_times.keys()][-1] != jira_key:
+                raise ValueError(f"Ticket histories must be grouped by key: at {jira_key}")
+
+            # Check for out of chronological order entries within a key 
+            if current_status_date is not None and current_status_date > ticket_history_entry['updated']:
+                raise ValueError(f"Ticket histories must be grouped by key and in chronological order: at {jira_key}")
+            else:
+                current_status_date = ticket_history_entry['updated']
+
+            # Update the log for a given status OR make a new key with a zero timespan
+            if (ticket_history_entry['field'] is not None):
+                if ticket_history_entry['from_val'] not in ticket_loiter_times[jira_key]:
+                    ticket_loiter_times[jira_key][ticket_history_entry['from_val']] = timedelta()
+
+                ticket_loiter_times[jira_key][ticket_history_entry['from_val']] += (
+                    datetime.fromisoformat(ticket_history_entry['updated']) - ticket_loiter_times[jira_key]['last_update'] 
+                )
+                ticket_loiter_times[jira_key]['last_status'] = ticket_history_entry['to_val']
+                ticket_loiter_times[jira_key]['last_update'] = datetime.fromisoformat(ticket_history_entry['updated'])
+        return ticket_loiter_times
