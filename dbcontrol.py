@@ -31,6 +31,7 @@ class DBControl:
                         "story_points, "
                         "fix_version, "
                         "severity, "
+                        "group_name, "
                         "sync_date);")
             cursor.execute("CREATE TABLE IF NOT EXISTS history"
                         "(id PRIMARY KEY, "
@@ -57,7 +58,6 @@ class DBControl:
             cursor.execute(update_date_sql)
             self.dbConn.commit()
         
-
     def get_last_updated_UTC(self):
         with self.dbConn:
             cursor = self.dbConn.cursor()
@@ -85,6 +85,7 @@ class DBControl:
             ":story_points, "
             ":fix_version, "
             ":severity, "
+            ":group_name, "
             ":sync_date) "
             "ON CONFLICT(id) DO UPDATE SET "
             "jira_key=excluded.jira_key, "
@@ -100,6 +101,7 @@ class DBControl:
             "story_points=excluded.story_points, "
             "fix_version=excluded.fix_version, "
             "severity=excluded.severity, "
+            "group_name=excluded.group_name, "
             "sync_date=sync_date")
         ticket_rows = []
         history_sql = ("INSERT INTO history VALUES ("
@@ -157,6 +159,11 @@ class DBControl:
                 severity = ticket["fields"]["customfield_10050"]["value"]
             except (IndexError, TypeError) as e:
                 severity = None
+            #10037 = Group
+            try:
+                group_name = ticket["fields"]["customfield_10037"]["name"]
+            except (IndexError, TypeError) as e:
+                group_name = None
             ticket_rows.append({
                 "id": ticket_id,
                 "jira_key": jira_key,
@@ -172,6 +179,7 @@ class DBControl:
                 "story_points": story_points,
                 "fix_version": fix_version,
                 "severity": severity,
+                "group_name": group_name,
                 "sync_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%z")})
 
             for history_entry in ticket["changelog"]["histories"]:
@@ -214,13 +222,19 @@ class DBControl:
     # point within a time window. Dates must be formatted as %Y-%m-%dT%H:%M:%S.%f+00:00
     # History entries will be returned in descending order of ticket id, then ascending
     # updated date. Empty history entries just get a single row with ticket and nulls
-    def get_ticket_status_updates(self, 
+    def get_dev_ticket_status_updates(self, 
                                   start_date, 
                                   end_date):
         if start_date is None:
             start_date = '2020-01-01T00:00:00.000-0000'
         if end_date is None:
             end_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%z")
+
+        team_names = ("'Engineers-GreenTeam', "
+                    "'Engineers-RedTeam', "
+                    "'Engineers-BlueTeam', "
+                    "'Engineers-YellowTeam', "
+                    "'Engineers-OrangeTeam'")
 
         query = (
             "SELECT t.jira_key"
@@ -233,9 +247,11 @@ class DBControl:
             ", t.resolved "
             ", t.resolution "
             "FROM tickets t "
-            "LEFT JOIN history h on t.id = h.ticket_id AND h.field = 'status'"
-            "WHERE t.\"type\" IN ('Bug','Story','Task')"
+            "LEFT JOIN history h on t.id = h.ticket_id AND (h.field = 'status' OR h.field = 'Key' OR h.field = 'Workflow')"
+            "WHERE t.\"type\" IN ('Bug','Story','Task', 'Maintenance')"
+            f"AND t.group_name in ({team_names}) "
             "AND t.status != 'Backlog' " # nothing we haven't even started
+            f"AND (t.resolved >= '{start_date}' OR t.status != 'Done') " # and actually got worked on after the start date
             f"AND t.created <= '{end_date}' "# created prior to end window
             "AND ( "
                     # we only care about stuff we decided to do (E.g., not duplicates)
@@ -249,3 +265,34 @@ class DBControl:
             cursor.execute(query)
             ticket_histories = cursor.fetchall()
             return ticket_histories
+    
+    def get_r_and_i_tickets_open(self, yearmonth):
+        year = yearmonth[2:6]
+        month = yearmonth[0:2]
+        query = ("select * from tickets t " 
+                "where t.group_name = 'Engineers-PurpleTeam' "
+                f"AND t.resolved >= '{year}-{month}-01' "
+                f"AND t.resolved < '{year}-{str(int(month)+1).zfill(2)}-25' "
+                "AND t.\"type\" = 'Story' "
+                "AND t.assignee IS NOT NULL " 
+                "AND t.assignee != '' "
+                "AND t.resolution = 'Done' "
+        )
+    
+    def get_r_and_i_tickets_completed(self, yearmonth):
+        year = yearmonth[0:4]
+        month = yearmonth[4:6]
+        query = ("select * from tickets t " 
+                "where t.group_name = 'Engineers-PurpleTeam' "
+                f"AND t.resolved >= '{year}-{month}-01' "
+                f"AND t.resolved < '{year}-{str(int(month)+1).zfill(2)}-01' "
+                "AND t.\"type\" = 'Story' "
+                "AND t.assignee IS NOT NULL " 
+                "AND t.assignee != '' "
+                "AND t.resolution = 'Done' "
+        )
+        with self.dbConn:
+            cursor = self.dbConn.cursor()
+            cursor.execute(query)
+            tickets = cursor.fetchall()
+            return tickets
